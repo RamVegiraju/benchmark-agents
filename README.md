@@ -1,0 +1,101 @@
+# Agent load-testing sample
+
+A LangGraph ReAct agent (two mock tools of different speeds) served via the
+**MLflow AgentServer**, load-tested with **Locust**, with per-request observability
+from **MLflow Tracing**. It measures throughput (TPS), request latency, time-to-first-token
+(TTFT), output-token throughput, and per-tool latency — and pinpoints the slow tool.
+
+## Repo layout
+
+| File | Purpose |
+|---|---|
+| `agent.py` | LangGraph agent + `ChatDatabricks` + two async tools: `get_weather` (~0.15s), `get_stock_price` (~0.8s, the bottleneck). |
+| `handlers.py` | Async `@invoke` / `@stream` handlers; MLflow tracing config (toggle `MLFLOW_TRACING_ENABLED`). |
+| `start_server.py`, `run_server.sh` | Start the AgentServer. |
+| `locustfile.py` | Locust users (streaming + non-streaming); streaming reports TTFT and full-stream duration. |
+| `report.py`, `run_load_test.sh` | Run the step-load and build `benchmark_report.md`. |
+| `validate_streaming.py` | Confirms tokens stream incrementally (not buffered). |
+| `bench_tracing.py` | Side check that tracing adds no latency. |
+
+## Configuration (what we tested on)
+
+| Setting | Value |
+|---|---|
+| LLM | `databricks-claude-opus-4-6` (Databricks FM API) |
+| Databricks profile | `adb-984752964297111` (used for FM API + tracing) |
+| MLflow experiment | `/Users/ram.vegiraju@databricks.com/load-test-agents` |
+| Serving | MLflow AgentServer · uvicorn · **async** handlers · 1 worker |
+| Load | Locust, streaming, concurrency **8 and 16** users, **60s** per level |
+| Tools | `get_weather` ~0.10–0.20s · `get_stock_price` ~0.70–0.90s |
+
+Change the model in `agent.py` (`LLM_ENDPOINT`), the experiment/profile via env vars
+(`MLFLOW_EXPERIMENT_PATH`, `DATABRICKS_CONFIG_PROFILE`), and concurrency levels as args
+to `run_load_test.sh`.
+
+## How to run
+
+Prerequisites: [`uv`](https://docs.astral.sh/uv/) and a Databricks profile with FM API access.
+
+```bash
+# 0. authenticate (once)
+databricks auth login --host <workspace-url> -p adb-984752964297111
+
+# 1. start the AgentServer (terminal 1). Add --workers N for multi-core scaling.
+./run_server.sh --port 8000 --workers 1
+
+# 2. run the step-load and generate the report (terminal 2)
+./run_load_test.sh 8 16            # concurrency levels; defaults to "8 16"
+
+# 3. read the report
+open benchmark_report.md
+```
+
+`run_server.sh` and `run_load_test.sh` default to profile `adb-984752964297111`; override
+with `DATABRICKS_CONFIG_PROFILE=<profile>`. `run_load_test.sh` writes Locust CSVs to
+`results/` and regenerates `benchmark_report.md`.
+
+Run pieces manually if you prefer:
+
+```bash
+# single streaming level
+DATABRICKS_CONFIG_PROFILE=adb-984752964297111 \
+  uv run locust -f locustfile.py StreamingUser --host http://localhost:8000 \
+    --headless -u 16 -r 16 -t 60s --csv results/stream_u16
+
+# report from existing CSVs (--since-ms scopes which traces to analyze)
+DATABRICKS_CONFIG_PROFILE=adb-984752964297111 uv run python report.py \
+  --stage 8 results/stream_u8 --stage 16 results/stream_u16 \
+  --since-ms <run-start-epoch-ms> --out benchmark_report.md
+
+# validate streaming is incremental
+uv run python validate_streaming.py --prompt "weather in Boston?"
+```
+
+## Concurrency model
+
+Handlers are **async** (`graph.ainvoke` / `graph.astream`), so one uvicorn worker's event
+loop interleaves many in-flight (I/O-bound) LLM requests instead of serializing them —
+throughput scales with concurrency on a single worker. Add `--workers N` for multi-core.
+
+## Metric sources
+
+- **TPS, request latency, TTFT** — Locust (client-side). TTFT is the time to the first
+  streamed answer token, read off the SSE stream.
+- **Output tokens, per-tool latency** — MLflow traces, read post-hoc from the async-exported
+  data, so they never touch the request path.
+
+## Tracing adds no latency
+
+Trace export runs on a background thread. Confirmed with `bench_tracing.py` (tracing ON vs
+OFF): p50 delta ≈ 0 ms, while the async export flush happens off the request path.
+
+```bash
+DATABRICKS_CONFIG_PROFILE=adb-984752964297111 uv run python bench_tracing.py --n 15
+```
+
+## References & credits
+
+- **Locust** — load generation. https://github.com/locustio/locust · docs: https://docs.locust.io
+- **MLflow AgentServer** — agent serving. https://mlflow.org/docs/latest/genai/serving/agent-server/
+- **MLflow** — tracing & observability. https://github.com/mlflow/mlflow
+- **Databricks app-templates** — async agent-serving patterns. https://github.com/databricks/app-templates
