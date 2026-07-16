@@ -33,7 +33,7 @@ from agent import graph
 logger = logging.getLogger(__name__)
 
 EXPERIMENT_PATH = os.environ.get(
-    "MLFLOW_EXPERIMENT_PATH", "/Users/ram.vegiraju@databricks.com/load-test-agents"
+    "MLFLOW_EXPERIMENT_PATH", "/Shared/load-test-agents"
 )
 
 # Tracing on/off toggle (MLFLOW_TRACING_ENABLED=0 disables). Export runs on a

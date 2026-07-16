@@ -10,12 +10,15 @@ Run:
 """
 
 import argparse
+import os
 import statistics
 import time
 
 import mlflow
 
 from agent import build_messages, graph
+
+EXPERIMENT_PATH = os.environ.get("MLFLOW_EXPERIMENT_PATH", "/Shared/load-test-agents")
 
 PROMPT = "What's the weather in Boston and the stock price of AAPL?"  # exercises both tools
 
@@ -46,7 +49,7 @@ def main():
     args = ap.parse_args()
 
     mlflow.set_tracking_uri("databricks")
-    mlflow.set_experiment("/Users/ram.vegiraju@databricks.com/load-test-agents")
+    mlflow.set_experiment(EXPERIMENT_PATH)
 
     # --- Tracing OFF ---
     mlflow.langchain.autolog(disable=True)

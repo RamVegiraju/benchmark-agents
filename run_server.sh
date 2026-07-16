@@ -6,7 +6,8 @@
 # Uses the Databricks profile below for both the FM API (LLM) and MLflow tracing.
 set -euo pipefail
 
-export DATABRICKS_CONFIG_PROFILE="${DATABRICKS_CONFIG_PROFILE:-adb-984752964297111}"
+# Set your Databricks profile (see `databricks auth profiles`) or export it beforehand.
+export DATABRICKS_CONFIG_PROFILE="${DATABRICKS_CONFIG_PROFILE:-DEFAULT}"
 
 # MLflow 3 exports traces to Databricks via the OTLP exporter. If the shell has
 # generic OTEL_* exporter vars set (some tooling injects them), they can redirect

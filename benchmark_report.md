@@ -1,5 +1,5 @@
 # Agent Load-Test Report
-_Generated 2026-07-16 15:15_
+_Generated 2026-07-16 15:55_
 
 ## Test environment
 
@@ -18,7 +18,7 @@ _Generated 2026-07-16 15:15_
 | 8 | 1.38 | 5,200 | 6,300 | 4,700 | 272 |
 | 16 | 2.70 | 5,400 | 6,600 | 4,800 | 533 |
 
-_TPS, request latency and TTFT are client-measured by Locust (the ground truth). output tok/s = TPS × mean output tokens/request (from MLflow traces). Of in-agent time, ~89% is the LLM and ~11% tools (per-span split; approximate under concurrency)._
+_TPS, request latency and TTFT are client-measured by Locust (the ground truth). output tok/s = TPS × mean output tokens/request (from MLflow traces). Across 185 complete traces, in-agent time is ~88% LLM and ~12% tools (leaf spans, whose sum matches the measured latency)._
 
 ## Per-tool latency (bottleneck check)
 

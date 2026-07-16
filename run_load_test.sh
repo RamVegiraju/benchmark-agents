@@ -5,7 +5,7 @@
 #   ./run_load_test.sh [users...]        e.g. ./run_load_test.sh 8 16 32
 set -euo pipefail
 
-export DATABRICKS_CONFIG_PROFILE="${DATABRICKS_CONFIG_PROFILE:-adb-984752964297111}"
+export DATABRICKS_CONFIG_PROFILE="${DATABRICKS_CONFIG_PROFILE:-DEFAULT}"
 HOST="${HOST:-http://localhost:8000}"
 DURATION="${DURATION:-60s}"
 if [ $# -gt 0 ]; then LEVELS=("$@"); else LEVELS=(8 16); fi

@@ -22,23 +22,26 @@ from **MLflow Tracing**. It measures throughput (TPS), request latency, time-to-
 | Setting | Value |
 |---|---|
 | LLM | `databricks-claude-opus-4-6` (Databricks FM API) |
-| Databricks profile | `adb-984752964297111` (used for FM API + tracing) |
-| MLflow experiment | `/Users/ram.vegiraju@databricks.com/load-test-agents` |
+| Databricks profile | your profile via `DATABRICKS_CONFIG_PROFILE` (defaults to `DEFAULT`) |
+| MLflow experiment | your path via `MLFLOW_EXPERIMENT_PATH` (defaults to `/Shared/load-test-agents`) |
 | Serving | MLflow AgentServer · uvicorn · **async** handlers · 1 worker |
 | Load | Locust, streaming, concurrency **8 and 16** users, **60s** per level |
 | Tools | `get_weather` ~0.10–0.20s · `get_stock_price` ~0.70–0.90s |
 
-Change the model in `agent.py` (`LLM_ENDPOINT`), the experiment/profile via env vars
-(`MLFLOW_EXPERIMENT_PATH`, `DATABRICKS_CONFIG_PROFILE`), and concurrency levels as args
-to `run_load_test.sh`.
+Configure via env vars — nothing workspace-specific is hardcoded:
+`DATABRICKS_CONFIG_PROFILE` (auth for FM API + tracing), `MLFLOW_EXPERIMENT_PATH`
+(where traces land), model in `agent.py` (`LLM_ENDPOINT`), concurrency as args to
+`run_load_test.sh`.
 
 ## How to run
 
 Prerequisites: [`uv`](https://docs.astral.sh/uv/) and a Databricks profile with FM API access.
 
 ```bash
-# 0. authenticate (once)
-databricks auth login --host <workspace-url> -p adb-984752964297111
+# 0. authenticate (once) and point the tools at your workspace
+databricks auth login --host <your-workspace-url> -p <your-profile>
+export DATABRICKS_CONFIG_PROFILE=<your-profile>
+export MLFLOW_EXPERIMENT_PATH=/Shared/load-test-agents   # or /Users/<you>/load-test-agents
 
 # 1. start the AgentServer (terminal 1). Add --workers N for multi-core scaling.
 ./run_server.sh --port 8000 --workers 1
@@ -50,20 +53,17 @@ databricks auth login --host <workspace-url> -p adb-984752964297111
 open benchmark_report.md
 ```
 
-`run_server.sh` and `run_load_test.sh` default to profile `adb-984752964297111`; override
-with `DATABRICKS_CONFIG_PROFILE=<profile>`. `run_load_test.sh` writes Locust CSVs to
-`results/` and regenerates `benchmark_report.md`.
+`run_load_test.sh` writes Locust CSVs to `results/` and regenerates `benchmark_report.md`.
 
 Run pieces manually if you prefer:
 
 ```bash
 # single streaming level
-DATABRICKS_CONFIG_PROFILE=adb-984752964297111 \
-  uv run locust -f locustfile.py StreamingUser --host http://localhost:8000 \
+uv run locust -f locustfile.py StreamingUser --host http://localhost:8000 \
     --headless -u 16 -r 16 -t 60s --csv results/stream_u16
 
 # report from existing CSVs (--since-ms scopes which traces to analyze)
-DATABRICKS_CONFIG_PROFILE=adb-984752964297111 uv run python report.py \
+uv run python report.py \
   --stage 8 results/stream_u8 --stage 16 results/stream_u16 \
   --since-ms <run-start-epoch-ms> --out benchmark_report.md
 
@@ -80,9 +80,17 @@ throughput scales with concurrency on a single worker. Add `--workers N` for mul
 ## Metric sources
 
 - **TPS, request latency, TTFT** — Locust (client-side). TTFT is the time to the first
-  streamed answer token, read off the SSE stream.
-- **Output tokens, per-tool latency** — MLflow traces, read post-hoc from the async-exported
-  data, so they never touch the request path.
+  streamed answer token, read off the SSE stream. These are the ground-truth latency numbers.
+- **Output tokens, per-tool latency, LLM-vs-tool split** — MLflow traces, read post-hoc from
+  the async-exported data, so they never touch the request path.
+
+Note on trace timing under async concurrency: LangChain autolog records span times via
+callbacks whose context propagation is imperfect under `asyncio` (see MLflow's
+`langchain_tracer.py`), so the trace **root** span can be mis-timed on a small fraction of
+traces. The report never uses the root for latency (that comes from Locust) and computes the
+LLM-vs-tool split from leaf spans only. For strictly-nested async traces, enable
+`mlflow.langchain.autolog(run_tracer_inline=True)` — at the cost of running callbacks on the
+request path.
 
 ## Tracing adds no latency
 
@@ -90,7 +98,7 @@ Trace export runs on a background thread. Confirmed with `bench_tracing.py` (tra
 OFF): p50 delta ≈ 0 ms, while the async export flush happens off the request path.
 
 ```bash
-DATABRICKS_CONFIG_PROFILE=adb-984752964297111 uv run python bench_tracing.py --n 15
+uv run python bench_tracing.py --n 15
 ```
 
 ## References & credits

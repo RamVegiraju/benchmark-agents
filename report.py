@@ -22,7 +22,7 @@ import platform
 import mlflow
 import pandas as pd
 
-EXPERIMENT_PATH = "/Users/ram.vegiraju@databricks.com/load-test-agents"
+EXPERIMENT_PATH = os.environ.get("MLFLOW_EXPERIMENT_PATH", "/Shared/load-test-agents")
 MODEL = "databricks-claude-opus-4-6"
 
 
@@ -104,19 +104,20 @@ def section_results(stages, tb) -> list[str]:
             f"{ms(ttft['50%']) if ttft is not None else '-'} | {rps * out_pr:,.0f} |"
         )
     lines.append("")
-    if not tb.empty:
-        # LLM-vs-tool split of in-agent (leaf-span) time. We deliberately do NOT divide by
-        # the trace root duration: under high async concurrency the root span closes before
-        # its LangChain-autolog child spans (their on_*_end callbacks fire late on a saturated
-        # event loop), so root time under-reports. Leaf spans stay reliable (per-tool times
-        # below match the simulated tool delays), so their ratio is the trustworthy signal.
-        llm, tool = tb["llm_ms"].mean(), tb["tool_ms"].mean()
+    # LLM-vs-tool split from leaf spans (never the trace root — under async concurrency the
+    # LangChain-autolog callbacks propagate context imperfectly, so the root span can be
+    # mis-timed and ~a few % of traces capture only a partial span tree). We restrict to
+    # complete requests (both an LLM and a tool span) and compare leaf spans to each other;
+    # their per-trace sum matches Locust's client-measured latency, so the ratio is reliable.
+    complete = tb[(tb["llm_ms"] > 0) & (tb["tool_ms"] > 0)] if not tb.empty else tb
+    if not complete.empty:
+        llm, tool = complete["llm_ms"].mean(), complete["tool_ms"].mean()
         span_sum = llm + tool or 1
         lines.append(
             f"_TPS, request latency and TTFT are client-measured by Locust (the ground truth). "
-            f"output tok/s = TPS × mean output tokens/request (from MLflow traces). Of in-agent time, "
-            f"~{llm / span_sum * 100:.0f}% is the LLM and ~{tool / span_sum * 100:.0f}% tools "
-            f"(per-span split; approximate under concurrency)._"
+            f"output tok/s = TPS × mean output tokens/request (from MLflow traces). Across "
+            f"{len(complete)} complete traces, in-agent time is ~{llm / span_sum * 100:.0f}% LLM and "
+            f"~{tool / span_sum * 100:.0f}% tools (leaf spans, whose sum matches the measured latency)._"
         )
         lines.append("")
     return lines
