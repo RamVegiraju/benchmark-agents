@@ -5,6 +5,8 @@ A LangGraph ReAct agent (two mock tools of different speeds) served via the
 from **MLflow Tracing**. It measures throughput (TPS), request latency, time-to-first-token
 (TTFT), output-token throughput, and per-tool latency — and pinpoints the slow tool.
 
+📺 **Video walkthrough:** https://www.youtube.com/watch?v=GaNRwzE6oaE&t=235s
+
 ## Repo layout
 
 | File | Purpose |
@@ -127,6 +129,7 @@ uv run python bench_tracing.py --n 15
 
 ## References & credits
 
+- **Video walkthrough** — https://www.youtube.com/watch?v=GaNRwzE6oaE&t=235s
 - **Locust** — load generation. https://github.com/locustio/locust · docs: https://docs.locust.io
 - **MLflow AgentServer** — agent serving. https://mlflow.org/docs/latest/genai/serving/agent-server/
 - **MLflow** — tracing & observability. https://github.com/mlflow/mlflow
