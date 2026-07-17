@@ -77,20 +77,44 @@ Handlers are **async** (`graph.ainvoke` / `graph.astream`), so one uvicorn worke
 loop interleaves many in-flight (I/O-bound) LLM requests instead of serializing them —
 throughput scales with concurrency on a single worker. Add `--workers N` for multi-core.
 
-## Metric sources
+## Metrics explained
 
-- **TPS, request latency, TTFT** — Locust (client-side). TTFT is the time to the first
-  streamed answer token, read off the SSE stream. These are the ground-truth latency numbers.
-- **Output tokens, per-tool latency, LLM-vs-tool split** — MLflow traces, read post-hoc from
-  the async-exported data, so they never touch the request path.
+| Metric | What it measures | How it's computed | Source |
+|---|---|---|---|
+| **Users (concurrency)** | Requests in flight at once — the load knob. Each Locust user sends a request, waits for the full response, then sends another. | Set per run (`-u N`). | Locust |
+| **TPS (req/s)** | Request throughput — how many full requests complete per second. Rises with concurrency until the server (or FM endpoint) saturates. | completed requests ÷ elapsed time | Locust |
+| **req p50 / p95 (ms)** | End-to-end request latency: send → full response received. p50 = median, p95 = slow tail. | client stopwatch per request | Locust |
+| **TTFT p50 (ms)** | Time to first token: send → first *answer* token streamed. In a ReAct agent this includes the decide→tool→second-call path, so it's the bulk of the request. | stopwatch to first `output_text.delta` on the SSE stream | Locust |
+| **output tok/s /user** | Per-user output rate: how many output tokens per second a single request gets, averaged over its whole life. Per-user, so it does **not** scale with concurrency — a drop between levels means each request slowed. | output tokens ÷ e2e request latency | tokens: MLflow · latency: Locust |
+| **Per-tool mean/p95 (ms)** | How long each tool takes (its span from call to return) — surfaces the bottleneck tool. | tool span duration, grouped by tool | MLflow traces |
+| **% LLM / % tools** | Of time spent inside the agent, model vs tools. | summed LLM spans vs tool spans (leaf spans) | MLflow traces |
 
-Note on trace timing under async concurrency: LangChain autolog records span times via
-callbacks whose context propagation is imperfect under `asyncio` (see MLflow's
-`langchain_tracer.py`), so the trace **root** span can be mis-timed on a small fraction of
-traces. The report never uses the root for latency (that comes from Locust) and computes the
-LLM-vs-tool split from leaf spans only. For strictly-nested async traces, enable
-`mlflow.langchain.autolog(run_tracer_inline=True)` — at the cost of running callbacks on the
-request path.
+**Two measurement systems:** Locust is an external client with a stopwatch — its numbers
+(TPS, latency, TTFT) are ground truth for wall-clock. MLflow traces are read *after* the run
+from async-exported data (never on the request path) and supply token counts and per-tool
+timing.
+
+**Why `output tok/s /user` looks low (~38, not hundreds):** the denominator is the *whole*
+request (~5.2s), but only ~0.5s of that is actually streaming the answer — the other ~4.7s
+(TTFT) is the model deciding, the tool running, and the second call starting. It's an
+*effective* per-user rate that charges the request for all its wall-clock, not raw model
+decode speed (which is several times higher).
+
+**Scope / honest caveats:**
+- We benchmark *through a hosted FM endpoint*, so a throughput ceiling may reflect the
+  endpoint's provisioned rate, not just this app/server.
+- Two concurrency levels (8, 16) is a starting point, not a full saturation sweep — to locate
+  the knee, sweep more levels (`./run_load_test.sh 4 8 16 32 64`) until latency climbs or
+  failures appear.
+- Input-token counts are omitted (the streaming integration double-counts them across SSE
+  chunks); `output_tokens` and `total_tokens` are reliable.
+
+**Trace timing under async concurrency:** LangChain autolog records span times via callbacks
+whose context propagation is imperfect under `asyncio` (see MLflow's `langchain_tracer.py`),
+so the trace **root** span is mis-timed on a small fraction of traces. The report never uses
+the root for latency (that's Locust) and computes the LLM-vs-tool split from leaf spans only.
+For strictly-nested async traces, enable `mlflow.langchain.autolog(run_tracer_inline=True)` —
+at the cost of running callbacks on the request path.
 
 ## Tracing adds no latency
 

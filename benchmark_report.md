@@ -1,5 +1,5 @@
 # Agent Load-Test Report
-_Generated 2026-07-16 15:55_
+_Generated 2026-07-16 21:36_
 
 ## Test environment
 
@@ -13,19 +13,19 @@ _Generated 2026-07-16 15:55_
 
 ## Load results by concurrency
 
-| Users | TPS (req/s) | req p50 (ms) | req p95 (ms) | TTFT p50 (ms) | output tok/s |
+| Users | TPS (req/s) | req p50 (ms) | req p95 (ms) | TTFT p50 (ms) | output tok/s /user |
 |--:|--:|--:|--:|--:|--:|
-| 8 | 1.38 | 5,200 | 6,300 | 4,700 | 272 |
-| 16 | 2.70 | 5,400 | 6,600 | 4,800 | 533 |
+| 8 | 1.51 | 4,700 | 5,800 | 4,300 | 43 |
+| 16 | 3.00 | 4,700 | 6,000 | 4,300 | 43 |
 
-_TPS, request latency and TTFT are client-measured by Locust (the ground truth). output tok/s = TPS × mean output tokens/request (from MLflow traces). Across 185 complete traces, in-agent time is ~88% LLM and ~12% tools (leaf spans, whose sum matches the measured latency)._
+_TPS, request latency and TTFT are client-measured by Locust (the ground truth). **output tok/s /user** = output tokens ÷ e2e request latency, per request — a per-user rate that does NOT scale with concurrency (so a drop between levels means each request slowed down). It reads well below raw decode speed because most of the request is TTFT (~4,300 of ~4,700 ms is spent before answer tokens stream, in the decide→tool→second-call path), not answer generation. Across 190 complete traces, in-agent time is ~88% LLM and ~12% tools._
 
 ## Per-tool latency (bottleneck check)
 
 | Tool | calls | mean (ms) | p95 (ms) | max (ms) |
 |---|--:|--:|--:|--:|
-| `get_stock_price` | 127 | 799 | 883 | 900 |
-| `get_weather` | 105 | 152 | 199 | 210 |
+| `get_stock_price` | 118 | 809 | 889 | 895 |
+| `get_weather` | 124 | 152 | 196 | 201 |
 
-**Bottleneck: `get_stock_price`** — ~5× slower than `get_weather` (799 ms vs 152 ms mean).
+**Bottleneck: `get_stock_price`** — ~5× slower than `get_weather` (809 ms vs 152 ms mean).
 

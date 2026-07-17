@@ -90,7 +90,7 @@ def section_env(args, stages) -> list[str]:
 def section_results(stages, tb) -> list[str]:
     out_pr = tb["output_tokens"].mean() if not tb.empty else 0
     lines = ["## Load results by concurrency", "",
-             "| Users | TPS (req/s) | req p50 (ms) | req p95 (ms) | TTFT p50 (ms) | output tok/s |",
+             "| Users | TPS (req/s) | req p50 (ms) | req p95 (ms) | TTFT p50 (ms) | output tok/s /user |",
              "|--:|--:|--:|--:|--:|--:|"]
     for label, prefix in stages:
         df = load_stats(prefix)
@@ -99,9 +99,14 @@ def section_results(stages, tb) -> list[str]:
         if tot is None:
             continue
         rps = float(tot["Requests/s"])
+        # Per-request (per-user) output rate = output tokens ÷ that request's latency.
+        # This is the per-user experience metric; unlike system throughput it does NOT
+        # scale with concurrency, so a drop between levels signals per-request slowdown.
+        p50_s = float(tot["50%"]) / 1000
+        per_req_rate = out_pr / p50_s if p50_s else 0
         lines.append(
             f"| {label} | {rps:.2f} | {ms(tot['50%'])} | {ms(tot['95%'])} | "
-            f"{ms(ttft['50%']) if ttft is not None else '-'} | {rps * out_pr:,.0f} |"
+            f"{ms(ttft['50%']) if ttft is not None else '-'} | {per_req_rate:,.0f} |"
         )
     lines.append("")
     # LLM-vs-tool split from leaf spans (never the trace root — under async concurrency the
@@ -115,9 +120,12 @@ def section_results(stages, tb) -> list[str]:
         span_sum = llm + tool or 1
         lines.append(
             f"_TPS, request latency and TTFT are client-measured by Locust (the ground truth). "
-            f"output tok/s = TPS × mean output tokens/request (from MLflow traces). Across "
-            f"{len(complete)} complete traces, in-agent time is ~{llm / span_sum * 100:.0f}% LLM and "
-            f"~{tool / span_sum * 100:.0f}% tools (leaf spans, whose sum matches the measured latency)._"
+            f"**output tok/s /user** = output tokens ÷ e2e request latency, per request — a per-user "
+            f"rate that does NOT scale with concurrency (so a drop between levels means each request "
+            f"slowed down). It reads well below raw decode speed because most of the request is TTFT "
+            f"(~{ms(ttft['50%'])} of ~{ms(tot['50%'])} ms is spent before answer tokens stream, in the "
+            f"decide→tool→second-call path), not answer generation. Across {len(complete)} complete "
+            f"traces, in-agent time is ~{llm / span_sum * 100:.0f}% LLM and ~{tool / span_sum * 100:.0f}% tools._"
         )
         lines.append("")
     return lines
