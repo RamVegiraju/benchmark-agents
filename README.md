@@ -105,6 +105,29 @@ open final_report.md
 Tuning knobs (env vars): `DURATION` (per-level load time, default `60s`), `STOP_TIMEOUT`
 (drain window, default `30s`), `JUDGE_MODEL` (eval judge endpoint).
 
+### How long it takes
+
+For the default `./run_all.sh 8 16` (two 60s levels, ~280 captured traces):
+
+| Phase | Rough time | What's happening |
+|---|---|---|
+| Server startup | ~1 min (first run only) | `uv` resolves deps, AgentServer boots, creates the experiment |
+| Load test | ~3–5 min | 15s warmup + 2 levels × (60s load + up to 30s drain) + reading traces back to build `benchmark_report.md` |
+| Evaluation | ~15–25 min | LLM-judge scoring of **every** captured trace across 5 scorers — the long pole |
+| **Total** | **~20–30 min** | |
+
+**The evaluation dominates and scales with trace count** — it runs the judges (`Correctness`,
+`RelevanceToQuery`, `Safety`, `tool_appropriateness`) over all completed traces, so more users
+or a longer `DURATION` means more traces and a proportionally longer judge pass. At `8 16` you
+get ~280 traces; the judge pass over that took ~17 min in our run. A quick smoke run (e.g.
+`./run_all.sh 4` with `DURATION=20s`) finishes in a few minutes.
+
+**Speeding it up:** the load test itself is only a few minutes — if you just want perf numbers,
+run only Part 1 (`./load_testing/run_load_test.sh 8 16`) and skip the eval. If you see repeated
+`databricks.sdk: Failed to ... host metadata ... Timed out after 0:05:00` warnings during the
+eval, those 5-minute fallbacks inflate the wall-clock (they're non-fatal — the SDK falls back to
+your explicit profile config).
+
 Run individual pieces manually if you prefer:
 
 ```bash
