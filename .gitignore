@@ -9,8 +9,12 @@ wheels/
 # Virtual environments
 .venv
 
-# Load-test outputs
+# Generated run outputs (regenerated each run; may embed workspace-specific URLs)
 results/
+load_testing/benchmark_report.md
+final_report.md
+evaluation/eval_results.json
+evaluation/eval_dataset.json
 
 # Local Claude Code settings
 .claude/

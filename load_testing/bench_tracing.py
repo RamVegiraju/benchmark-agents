@@ -10,12 +10,17 @@ Run:
 """
 
 import argparse
+import asyncio
 import os
 import statistics
+import sys
 import time
+from pathlib import Path
 
 import mlflow
 
+# Shared agent code lives at the repo root (one level up from load_testing/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent import build_messages, graph
 
 EXPERIMENT_PATH = os.environ.get("MLFLOW_EXPERIMENT_PATH", "/Shared/load-test-agents")
@@ -23,16 +28,17 @@ EXPERIMENT_PATH = os.environ.get("MLFLOW_EXPERIMENT_PATH", "/Shared/load-test-ag
 PROMPT = "What's the weather in Boston and the stock price of AAPL?"  # exercises both tools
 
 
-def timed_invoke() -> float:
+async def timed_invoke() -> float:
+    # Tools are async, so drive the graph with ainvoke (sync invoke raises on async tools).
     start = time.perf_counter()
-    graph.invoke(build_messages(PROMPT))
+    await graph.ainvoke(build_messages(PROMPT))
     return (time.perf_counter() - start) * 1000  # ms
 
 
-def run(n: int) -> list[float]:
+async def run(n: int) -> list[float]:
     # warm-up (JIT/connection pool) so we don't bias the first sample
-    timed_invoke()
-    return [timed_invoke() for _ in range(n)]
+    await timed_invoke()
+    return [await timed_invoke() for _ in range(n)]
 
 
 def summarize(label: str, xs: list[float]) -> None:
@@ -43,7 +49,7 @@ def summarize(label: str, xs: list[float]) -> None:
           f"p50={p50:7.1f}ms  p95={p95:7.1f}ms  min={min(xs):7.1f}ms")
 
 
-def main():
+async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=20, help="calls per condition")
     args = ap.parse_args()
@@ -54,12 +60,12 @@ def main():
     # --- Tracing OFF ---
     mlflow.langchain.autolog(disable=True)
     mlflow.tracing.disable()
-    off = run(args.n)
+    off = await run(args.n)
 
     # --- Tracing ON (async export to workspace experiment) ---
     mlflow.tracing.enable()
     mlflow.langchain.autolog()
-    on = run(args.n)
+    on = await run(args.n)
 
     # Ensure any queued exports finish before we exit (does not count toward call latency).
     export_start = time.perf_counter()
@@ -76,4 +82,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

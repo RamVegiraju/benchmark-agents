@@ -18,17 +18,20 @@ viewable in the workspace experiment for per-request bottleneck analysis.
 
 import json
 import random
+import sys
 import time
+from pathlib import Path
 
 from locust import HttpUser, between, task
 
-# (prompt, weight) — exercises tool A only, tool B only, and both tools.
-PROMPTS = [
-    ("What's the weather in Boston?", 3),
-    ("What's the stock price of AAPL?", 3),
-    ("What's the weather in Boston and the stock price of AAPL?", 2),
-]
-_choices, _weights = zip(*PROMPTS)
+# Shared question set lives at the repo root (one level up from load_testing/).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from questions import weighted_prompts
+
+# Prompts + weights come from the shared question set (structured + open-ended), so the
+# load exercises single-tool, both-tool, and open-ended paths. The evaluation reads the
+# same set for ground truth, so load and eval stay in lockstep.
+_choices, _weights = weighted_prompts()
 
 
 def pick_prompt() -> str:
