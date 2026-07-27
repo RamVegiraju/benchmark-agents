@@ -1,0 +1,42 @@
+# Databricks App config for the LOAD GENERATOR (separate from the agent app).
+# Runs the Locust WEB UI on port 8000 (the Apps default) so the app URL opens the
+# live-traffic dashboard: request/sec, latency percentiles, TTFT, failures, all live.
+#
+# --host is the agent app URL under test. Auth to it uses M2M OAuth (the locustfile
+# mints a token from DATABRICKS_CLIENT_ID/SECRET/HOST); set those as app resources
+# or env below. With LOCUST_AUTORAMP=1, clicking "Start" ramps to saturation.
+command:
+  - "uv"
+  - "run"
+  - "locust"
+  - "-f"
+  - "locustfile.py"
+  - "--web-host"
+  - "0.0.0.0"
+  - "--web-port"
+  - "8000"
+  - "--host"
+  - "https://REPLACE-with-agent-app-url.databricksapps.com"
+  # Pre-fill the web UI concurrency (manual mode); you still click Start. Ignored
+  # when the ramp shape is active (LOCUST_AUTORAMP=1).
+  - "-u"
+  - "20"
+  - "-r"
+  - "10"
+
+env:
+  - name: TARGET_HOST
+    value: "https://REPLACE-with-agent-app-url.databricksapps.com"
+  # NOTE: do NOT set DATABRICKS_HOST / DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET
+  # here — Databricks Apps inject the app's own service-principal OAuth creds under
+  # those names automatically. The locustfile mints a token from them. Just grant this
+  # app's service principal "can use" on the agent app so the token is authorized.
+  # One-click ramp-to-saturation in the UI (unset for manual user counts).
+  - name: LOCUST_AUTORAMP
+    value: "1"
+  - name: MAX_USERS
+    value: "300"
+  - name: STEP_SIZE
+    value: "20"
+  - name: STEP_DURATION
+    value: "30"

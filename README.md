@@ -13,6 +13,23 @@ speeds), served via the **MLflow AgentServer**:
 Both land in one **MLflow experiment** (traces + evaluation runs) and are synthesized
 into a single **`final_report.md`**.
 
+## Levels — how far to take it
+
+The repo builds up in three levels; each adds to the previous without changing it.
+
+| Level | What you do | Where it runs | Report it produces |
+|---|---|---|---|
+| **1 — Load test only** | Locust step-load against the agent | Local server + local Locust | `load_testing/benchmark_report.md` |
+| **2 — Load test + eval** | Level 1, then MLflow judges score the captured traces | Local | `final_report.md` |
+| **3 — Deploy + test as Apps** | Deploy the agent as a Databricks **App**, load-test it from a **separate Locust App** (live UI) or headless CLI | Databricks Apps | `dashboard.html` + validated `app_load_test_report.md` |
+
+Exec steps for each are in [How to run](#how-to-run); Part 3's full runbook is in
+[`app_deployment/README.md`](app_deployment/README.md).
+
+Levels 1 & 2 are the video workflow and are unchanged. Level 3 is additive: it reuses
+the same agent/serving code and adds deployment config (`databricks.yml`, `app.yaml`)
+plus the `app_deployment/` directory.
+
 ## Repo layout
 
 Shared agent + serving code lives at the repo root; the two assessments live in their
@@ -35,6 +52,9 @@ own directories.
 | `evaluation/scorers.py` | Ground-truth scorers (custom tool-call + `Correctness`) and reference-free scorers (`RelevanceToQuery`, `Safety`, custom tool-appropriateness judge). |
 | `evaluation/run_eval.py`, `run_eval.sh` | Score **all** captured traces post-hoc; write `eval_results.json`. |
 | `evaluation/final_report.py` | Merge load-test + eval into `final_report.md`. |
+| `mock_llm.py` | **Level 3.** Opt-in (`MOCK_LLM=1`) streamed mock that replaces the FM endpoint so load tests can measure serving-infra throughput without model latency/cost. Default OFF. |
+| `app.yaml`, `databricks.yml` | **Level 3.** Databricks Asset Bundle: deploys the agent app + a separate Locust load-generator app, with a worker/compute sweep. |
+| **`app_deployment/`** | **Level 3.** Deploy-and-test-as-Apps guide + the Locust load-generator app (`load_test_app/`). See [`app_deployment/README.md`](app_deployment/README.md). |
 
 ## Video walkthrough
 
@@ -74,36 +94,52 @@ Nothing workspace-specific is hardcoded — configure via env vars:
 Prerequisites: [`uv`](https://docs.astral.sh/uv/) and a Databricks profile with FM API access.
 
 ```bash
-# 0. authenticate (once) and point the tools at your workspace
+# One-time setup (all parts)
 databricks auth login --host <your-workspace-url> -p <your-profile>
 export DATABRICKS_CONFIG_PROFILE=<your-profile>
 export MLFLOW_EXPERIMENT_PATH=/Shared/load-test-agents   # or /Users/<you>/load-test-agents
-
-# 1. start the AgentServer (terminal 1). Add --workers N for multi-core scaling.
-./run_server.sh --port 8000 --workers 1
-
-# 2. everything else (terminal 2): load test -> evaluate -> final_report.md
-./run_all.sh 8 16                  # concurrency levels; defaults to "8 16"
-open final_report.md
 ```
 
-Or run the two parts separately (the server must be running for Part 1):
+Each part below is self-contained. Pick the level you want; each ends with the report it writes.
+
+### Part 1 — Load test only (local)
+
+Runs a local server + Locust step-load. **Produces `load_testing/benchmark_report.md`.**
 
 ```bash
-# --- Part 1: load testing (the video) ---
-# Drives the questions in questions.py, writes load_testing/results/ + benchmark_report.md.
-# Uses Locust --stop-timeout so in-flight streaming requests drain cleanly at stage end.
-./load_testing/run_load_test.sh 8 16          # concurrency levels; defaults to "8 16"
+./run_server.sh --port 8000 --workers 1        # terminal 1 (leave running)
+./load_testing/run_load_test.sh 8 16           # terminal 2 — concurrency levels (default "8 16")
 open load_testing/benchmark_report.md
+```
 
-# --- Part 2: evaluation (runs against the traces Part 1 captured) ---
-# Scores ALL completed traces (no sampling) and synthesizes final_report.md.
-./evaluation/run_eval.sh
+### Part 2 — Load test + evaluation (local)
+
+Part 1, then MLflow judges score the captured traces. **Produces `final_report.md`.**
+
+```bash
+./run_server.sh --port 8000 --workers 1        # terminal 1 (leave running)
+./run_all.sh 8 16                              # terminal 2 — load test → eval → report
 open final_report.md
 ```
 
-Tuning knobs (env vars): `DURATION` (per-level load time, default `60s`), `STOP_TIMEOUT`
-(drain window, default `30s`), `JUDGE_MODEL` (eval judge endpoint).
+### Part 3 — Deploy as Databricks Apps + load test
+
+Deploys the agent as an app and load-tests it from a **separate Locust app** (live UI) or
+a headless CLI. **Produces `dashboard.html` (CLI) and a validated `app_load_test_report.md`**
+(cross-checks Locust client-side vs MLflow server-side — the source of truth for reliability).
+
+```bash
+# full runbook — deploy, run, and report — is in app_deployment/README.md
+databricks bundle deploy -t agent-w4 -p <profile> && databricks bundle run agent_app -t agent-w4 -p <profile>
+# ...then drive load from the Locust app UI or run_load_test.py, and generate the report:
+DATABRICKS_CONFIG_PROFILE=<profile> uv run python app_deployment/load_test_app/report.py --minutes 10 --out app_load_test_report.md
+open app_load_test_report.md
+```
+
+See **[`app_deployment/README.md`](app_deployment/README.md)** for the full Part 3 steps.
+
+Tuning knobs (Parts 1 & 2 env vars): `DURATION` (per-level load time, default `60s`),
+`STOP_TIMEOUT` (drain window, default `30s`), `JUDGE_MODEL` (eval judge endpoint).
 
 ### How long it takes
 
@@ -131,7 +167,7 @@ your explicit profile config).
 Run individual pieces manually if you prefer:
 
 ```bash
-# single streaming load level
+# single streaming load level (Part 1)
 cd load_testing && uv run locust -f locustfile.py StreamingUser --host http://localhost:8000 \
     --headless -u 16 -r 16 -t 60s --stop-timeout 30s --csv results/stream_u16
 

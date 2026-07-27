@@ -1,0 +1,18 @@
+[project]
+# Isolated deps for the load generator so they never touch the agent app's
+# production dependency set. This directory deploys as its own Databricks App.
+name = "load-test-app"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    # locust >= 2.40 has a known RecursionError; pin below it.
+    "locust>=2.32,<2.40",
+    "urllib3<2.3",
+    "requests",
+]
+
+[tool.uv]
+# Flat scripts (locustfile.py, run_load_test.py, ...) with no build backend — install
+# deps only, don't try to package this dir (would fail flat-layout autodiscovery in a
+# fresh Databricks App install).
+package = false

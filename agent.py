@@ -1,6 +1,7 @@
 """LangGraph ReAct agent with two mock tools, backed by the Databricks FM API."""
 
 import asyncio
+import os
 import random
 
 from databricks_langchain import ChatDatabricks
@@ -8,6 +9,11 @@ from langchain.agents import create_agent
 from langchain_core.tools import tool
 
 LLM_ENDPOINT = "databricks-claude-opus-4-6"
+
+# Opt-in capacity-testing mode (default OFF, so Parts 1 & 2 are unchanged): swap the
+# FM endpoint for a local streamed mock to measure serving-infra throughput without
+# model latency/cost. See mock_llm.py and app_deployment/README.md.
+MOCK_LLM = os.environ.get("MOCK_LLM", "0").lower() in ("1", "true", "yes")
 
 
 # Async tools: on an async server, I/O-bound tools should be `async def` so they
@@ -30,7 +36,13 @@ async def get_stock_price(ticker: str) -> str:
 
 TOOLS = [get_weather, get_stock_price]
 
-llm = ChatDatabricks(endpoint=LLM_ENDPOINT, temperature=0)
+if MOCK_LLM:
+    from mock_llm import build_mock_llm
+
+    llm = build_mock_llm()
+else:
+    llm = ChatDatabricks(endpoint=LLM_ENDPOINT, temperature=0)
+
 graph = create_agent(llm, TOOLS)
 
 

@@ -1,0 +1,159 @@
+# Databricks Asset Bundle — Part 3.
+#
+# Defines TWO apps, kept deliberately separate (docs' recommendation): the load
+# generator must never share compute with the agent, or you'd measure them fighting
+# for the same cores instead of the agent's true ceiling.
+#
+#   agent_app    the system under test (MLflow AgentServer, root code)
+#   loadgen_app  Locust hosted AS its own app (web UI on :8000), pointed at agent_app
+#
+# The worker/compute sweep is driven by targets: each target overrides ${workers}
+# and the app name so you can deploy several variants and load-test each.
+# Compute size is not a stable bundle field yet — set it per app with the CLI:
+#   databricks apps update <name> --compute-size LARGE
+#
+# See app_deployment/README.md for the full Part 3 runbook.
+bundle:
+  name: load-test-agents
+
+variables:
+  workers:
+    description: uvicorn worker processes for the agent app (aim ~= container vCPUs)
+    default: "2"
+  agent_app_name:
+    description: name of the agent (system-under-test) app
+    default: "load-test-agent-w2"
+  loadgen_app_name:
+    description: name of the Locust load-generator app
+    default: "load-test-locust"
+  experiment_path:
+    description: MLflow experiment traces land in (same as Parts 1 & 2)
+    default: "/Shared/load-test-agents"
+  mock_llm:
+    description: "1 = capacity mode (no FM API); 0 = end-to-end with the real model"
+    default: "0"
+  target_host:
+    description: agent app URL the load generator hits (e.g. https://<agent>.<region>.databricksapps.com)
+    default: ""
+  max_users:
+    default: "300"
+  step_size:
+    default: "20"
+  step_duration:
+    default: "30"
+  autoramp:
+    description: "1 = shape ramps to saturation; 0 = manual/fixed concurrency (for controlled validation runs)"
+    default: "1"
+  default_users:
+    description: "concurrency the Locust web UI pre-fills (manual mode); click Start to run at this level"
+    default: "20"
+  default_spawn:
+    description: "users spawned per second to reach default_users"
+    default: "10"
+
+# Keep uploads lean: runtime only needs the agent code + lockfile. Generated
+# outputs and local venvs are never part of the app image.
+sync:
+  exclude:
+    - "**/.venv/**"
+    - "**/__pycache__/**"
+    - "**/results/**"
+    - "load-test-runs/**"
+    - ".git/**"
+    - ".isaac/**"
+    # Do NOT ship the lockfile to the app. Ours is relocked against PUBLIC PyPI, which
+    # forces the Apps build to fetch those exact artifacts through the workspace's
+    # internal proxy (pypi-proxy.dev.databricks.com) — slow, and it timed out per
+    # package. The app-templates deploy WITHOUT a lock so uv resolves against the proxy
+    # and picks cached artifacts. Keep uv.lock locally for Parts 1 & 2 reproducibility.
+    - "uv.lock"
+    - "**/uv.lock"
+
+resources:
+  apps:
+    agent_app:
+      name: ${var.agent_app_name}
+      description: "LangGraph agent under test (MLflow AgentServer)"
+      source_code_path: .
+      config:
+        command: ["uv", "run", "python", "start_server.py", "--workers", "${var.workers}"]
+        env:
+          # The Apps build's internal PyPI proxy can be slow; raise uv's HTTP timeout
+          # (default 30s) so large downloads complete instead of "operation timed out".
+          - name: UV_HTTP_TIMEOUT
+            value: "300"
+          - name: MLFLOW_EXPERIMENT_PATH
+            value: ${var.experiment_path}
+          - name: MOCK_LLM
+            value: ${var.mock_llm}
+          - name: MOCK_CHUNK_DELAY_MS
+            value: "10"
+          - name: MOCK_CHUNK_COUNT
+            value: "80"
+
+    loadgen_app:
+      name: ${var.loadgen_app_name}
+      description: "Locust load generator (web UI), isolated from the agent app"
+      source_code_path: ./app_deployment/load_test_app
+      config:
+        command:
+          - "uv"
+          - "run"
+          - "locust"
+          - "-f"
+          - "locustfile.py"
+          - "--web-host"
+          - "0.0.0.0"
+          - "--web-port"
+          - "8000"
+          - "--host"
+          - ${var.target_host}
+          # Pre-fill the web UI concurrency (manual mode). Ignored when a ramp shape is
+          # active (autoramp=1). You still click Start; this is just the default value.
+          - "-u"
+          - ${var.default_users}
+          - "-r"
+          - ${var.default_spawn}
+        env:
+          - name: TARGET_HOST
+            value: ${var.target_host}
+          - name: MAX_USERS
+            value: ${var.max_users}
+          - name: STEP_SIZE
+            value: ${var.step_size}
+          - name: STEP_DURATION
+            value: ${var.step_duration}
+          # Auto-apply the step-ramp shape in the app's web UI (click Start -> it ramps
+          # to saturation). Unset for fully-manual user counts in the UI.
+          - name: LOCUST_AUTORAMP
+            value: ${var.autoramp}
+
+targets:
+  # Local/default deploy target: small agent app + the load generator.
+  # No workspace.host is pinned — the target follows whatever profile you pass
+  # (`-p <profile>`), so this bundle deploys to ANY workspace unchanged. To pin a
+  # workspace for CI, set workspace.host here or in a prod target.
+  dev:
+    mode: development
+    default: true
+
+  # --- Agent-app worker sweep (deploy each, then load-test with the same URL) ---
+  agent-w2:
+    variables:
+      agent_app_name: "load-test-agent-w2"
+      workers: "2"
+  agent-w4:
+    variables:
+      agent_app_name: "load-test-agent-w4"
+      workers: "4"
+  agent-w8:
+    variables:
+      agent_app_name: "load-test-agent-w8"
+      workers: "8"
+
+  # Capacity-mode variant (no FM API) to find the pure serving-infra ceiling.
+  agent-w4-mock:
+    variables:
+      agent_app_name: "load-test-agent-w4-mock"
+      workers: "4"
+      mock_llm: "1"

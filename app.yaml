@@ -1,0 +1,28 @@
+# Databricks App config for the AGENT app (the system under test).
+# Serves the MLflow AgentServer on port 8000 (the Apps default).
+#
+# `--workers N` is the main in-app scaling knob. The handlers are async, so one
+# worker's event loop already interleaves many in-flight LLM requests; extra
+# workers add parallelism across the container's vCPUs (aim workers ~= vCPUs).
+# The bundle (databricks.yml) overrides ${workers} per target for the sweep.
+#
+# Deploy this app either via the bundle (recommended, see app_deployment/README.md)
+# or directly with `databricks apps deploy`.
+command: ["uv", "run", "python", "start_server.py", "--workers", "2"]
+
+env:
+  # The Apps build's internal PyPI proxy can be slow; raise uv's HTTP timeout (default
+  # 30s) so large downloads complete instead of "operation timed out".
+  - name: UV_HTTP_TIMEOUT
+    value: "300"
+  # Trace + auth use the app's service principal (unified auth); no profile needed.
+  - name: MLFLOW_EXPERIMENT_PATH
+    value: "/Shared/load-test-agents"
+  # Capacity mode: set MOCK_LLM=1 to measure serving-infra throughput without the
+  # Foundation Model API (skips tool calls, streams a canned answer). Default OFF.
+  - name: MOCK_LLM
+    value: "0"
+  - name: MOCK_CHUNK_DELAY_MS
+    value: "10"
+  - name: MOCK_CHUNK_COUNT
+    value: "80"

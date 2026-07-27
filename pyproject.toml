@@ -7,7 +7,19 @@ requires-python = ">=3.12"
 dependencies = [
     "databricks-langchain>=0.20.0",
     "langgraph>=1.2.8",
-    "locust>=2.45.0",
     "mlflow>=3.4",
     "opentelemetry-exporter-otlp-proto-http>=1.43.0",
 ]
+
+# locust is a LOCAL load-testing tool (Parts 1 & 2), not an agent runtime dep. Keeping
+# it in the `dev` group (installed by default for local `uv run`, so Parts 1 & 2 are
+# unchanged) keeps it OUT of the deployed agent app — which otherwise dragged in
+# flask/flask-login/gevent/msgpack and failed the app's package install.
+[dependency-groups]
+dev = ["locust>=2.45.0"]
+
+[tool.uv]
+# Flat layout (agent.py, handlers.py, ... at the root) with no build backend. Install
+# dependencies only; don't build/package this project (a fresh install would otherwise
+# fail setuptools flat-layout autodiscovery). Imports resolve from cwd.
+package = false

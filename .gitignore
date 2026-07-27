@@ -18,3 +18,10 @@ evaluation/eval_dataset.json
 
 # Local Claude Code settings
 .claude/
+.isaac/
+
+# Level 3: load-gen run outputs + DAB deploy state
+load-test-runs/
+.databricks/
+app_deployment/load_test_app/.env
+app_deployment/load_test_app/uv.lock
